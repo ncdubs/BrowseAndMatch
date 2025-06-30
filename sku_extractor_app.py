@@ -3,8 +3,6 @@ import pandas as pd
 import re
 from io import BytesIO
 
-st.title("SKU Extractor & Appliance Catalog Uploader")
-
 def extract_skus_from_text(text):
     sku_pattern = re.compile(r"\b[A-Z]{2,}[0-9]{2,}[A-Z0-9]*\b")
     matches = sku_pattern.findall(text.upper())
@@ -22,18 +20,13 @@ def extract_skus_from_excel(df):
                 skus.add(match)
     return sorted(skus)
 
-def to_excel(sku_list):
-    df = pd.DataFrame({'SKU': sku_list, 'GE SKU': ''})
-    output = BytesIO()
-    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        df.to_excel(writer, index=False)
-    return output.getvalue()
+st.title("SKU Similarity Finder")
 
-# --- Step 1: Input SKUs ---
-st.header("Step 1: Enter competitor SKUs")
+# Step 1: Enter/paste competitor SKUs
+st.header("Step 1: Enter Competitor SKUs")
 uploaded_file = st.file_uploader("Upload Excel file with SKUs", type=["xlsx", "xls"])
 st.markdown("### OR")
-pasted_data = st.text_area("Paste competitor SKU data here (from Excel, CSV, etc):")
+pasted_data = st.text_area("Paste competitor SKU data here:")
 
 skus = []
 
@@ -46,14 +39,9 @@ elif pasted_data.strip():
 if skus:
     st.success(f"✅ Found {len(skus)} unique SKUs:")
     st.dataframe(pd.DataFrame({'SKU': skus}))
-    excel_data = to_excel(skus)
-    st.download_button("Download SKUs to Excel", data=excel_data, file_name="sku_output.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-else:
-    st.info("Upload an Excel file or paste your data above to extract SKUs.")
 
-# --- Step 2: Upload Appliance Folder ---
-st.header("Step 2: Upload Appliance Catalog (GE or other brands)")
-
+# Step 2: Upload appliance catalog
+st.header("Step 2: Upload Appliance Catalog (GE + Competitors)")
 appliance_file = st.file_uploader("Upload appliance catalog Excel file (with specs)", type=["xlsx", "xls"], key="appliance_upload")
 appliance_df = None
 
@@ -62,6 +50,42 @@ if appliance_file is not None:
     st.success(f"✅ Loaded appliance catalog with {appliance_df.shape[0]} products and {appliance_df.shape[1]} columns.")
     st.dataframe(appliance_df.head(20))
 
-# --- Ready for Next Steps (Matching) ---
+# Step 3: Run similarity matching
 if skus and appliance_df is not None:
-    st.info("✅ Both SKU list and appliance catalog loaded! Ready for matching logic in next step.")
+    if not {'SKU', 'Brand'}.issubset(appliance_df.columns):
+        st.error("Appliance catalog must contain 'SKU' and 'Brand' columns.")
+    else:
+        feature_cols = [col for col in appliance_df.columns if col not in ['SKU', 'Brand']]
+        ge_products = appliance_df[appliance_df['Brand'].str.contains("GE", na=False, case=False)].reset_index(drop=True)
+        results = []
+
+        for competitor_sku in skus:
+            # Find the competitor product row
+            competitor_row = appliance_df[appliance_df['SKU'].astype(str).str.upper() == competitor_sku]
+            if competitor_row.empty:
+                results.append({'Entered SKU': competitor_sku, 'Closest GE SKU': 'Not found'})
+                continue
+
+            competitor_features = competitor_row[feature_cols].iloc[0]
+
+            # Compute "similarity" (count matching features) for all GE products
+            def feature_similarity(ge_row):
+                return sum(
+                    (str(competitor_features[col]).strip().lower() == str(ge_row[col]).strip().lower())
+                    for col in feature_cols if pd.notnull(competitor_features[col]) and pd.notnull(ge_row[col])
+                )
+
+            ge_products['SimilarityScore'] = ge_products.apply(feature_similarity, axis=1)
+            best_match_row = ge_products.sort_values('SimilarityScore', ascending=False).iloc[0]
+
+            if best_match_row['SimilarityScore'] == 0:
+                closest_ge = 'Not found'
+            else:
+                closest_ge = best_match_row['SKU']
+
+            results.append({'Entered SKU': competitor_sku, 'Closest GE SKU': closest_ge})
+
+        results_df = pd.DataFrame(results)
+        st.subheader("Matching Results")
+        st.dataframe(results_df)
+
