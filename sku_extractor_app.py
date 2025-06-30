@@ -1,8 +1,9 @@
 import streamlit as st
 import pandas as pd
+import re
+from io import BytesIO
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
-import re
 
 st.title("Bulk SKU Similarity Finder (TF-IDF Cosine)")
 
@@ -11,22 +12,42 @@ st.header("Step 1: Enter Competitor SKUs")
 uploaded_file = st.file_uploader("Upload Excel file with SKUs", type=["xlsx", "xls"])
 pasted_data = st.text_area("Paste competitor SKU data here:")
 
+def extract_skus_from_excel(df):
+    all_text = df.astype(str).values.flatten()
+    sku_pattern = re.compile(r"\b[A-Z]{2,}[0-9]{2,}[A-Z0-9]*\b")
+    skus = set()
+    for text in all_text:
+        matches = sku_pattern.findall(text)
+        for match in matches:
+            if len(match) >= 6:
+                skus.add(match)
+    return sorted(skus)
+
 def extract_skus_from_text(text):
-    sku_pattern = re.compile(r"\b[A-Z0-9]{6,}\b")
+    sku_pattern = re.compile(r"\b[A-Z]{2,}[0-9]{2,}[A-Z0-9]*\b")
     matches = sku_pattern.findall(text.upper())
-    skus = sorted(set(matches))
-    return skus
+    skus = {sku for sku in matches if len(sku) >= 6}
+    return sorted(skus)
+
+def to_excel(sku_list):
+    df = pd.DataFrame({'SKU': sku_list, 'GE SKU': ''})
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df.to_excel(writer, index=False)
+    return output.getvalue()
 
 skus = []
 if uploaded_file:
-    df = pd.read_excel(uploaded_file, header=None)
-    skus = extract_skus_from_text(' '.join(df.astype(str).values.flatten()))
+    df_upload = pd.read_excel(uploaded_file, header=None)
+    skus = extract_skus_from_excel(df_upload)
 elif pasted_data.strip():
     skus = extract_skus_from_text(pasted_data)
 
 if skus:
     st.success(f"✅ Found {len(skus)} unique SKUs:")
     st.dataframe(pd.DataFrame({'SKU': skus}))
+    excel_data = to_excel(skus)
+    st.download_button("Download SKUs to Excel", data=excel_data, file_name="sku_output.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 # STEP 2: Upload catalog
 st.header("Step 2: Upload Appliance Catalog (Tall Format)")
@@ -48,17 +69,12 @@ if 'Configuration' not in df.columns:
     st.error("No 'Configuration' column found!")
     st.stop()
 
-# Feature selection
-all_features = [col for col in df.columns if col not in ['SKU', 'Brand', 'Model Status', 'combined_specs']]
-selected_features = st.multiselect("Select features to use for similarity (weighted)", all_features, default=all_features)
+# Use all features except for core metadata columns for matching
+discard_cols = ['SKU', 'Brand', 'Model Status', 'combined_specs']
+all_features = [col for col in df.columns if col not in discard_cols]
 
-# Create weighted combined string
-df['combined_specs'] = ""
-for col in selected_features:
-    weight = 3  # You can allow the user to set different weights if desired
-    df['combined_specs'] += ((df[col].astype(str) + " ") * weight)
-if not selected_features:
-    df['combined_specs'] = df[all_features].astype(str).agg(' '.join, axis=1)
+# Create combined specs string (default weighting = 1)
+df['combined_specs'] = df[all_features].astype(str).agg(' '.join, axis=1)
 
 # Build TF-IDF matrix
 vectorizer = TfidfVectorizer()
