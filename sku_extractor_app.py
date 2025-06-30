@@ -37,8 +37,7 @@ def extract_skus_from_text(text):
                 seen.add(sku)
     return skus
 
-def to_excel(sku_list):
-    df = pd.DataFrame({'SKU': sku_list, 'GE SKU': ''})
+def to_excel(df):
     output = BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         df.to_excel(writer, index=False)
@@ -54,7 +53,7 @@ elif pasted_data.strip():
 if skus:
     st.success(f"✅ Found {len(skus)} unique SKUs:")
     st.dataframe(pd.DataFrame({'SKU': skus}))
-    excel_data = to_excel(skus)
+    excel_data = to_excel(pd.DataFrame({'SKU': skus}))
     st.download_button("Download SKUs to Excel", data=excel_data, file_name="sku_output.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 # STEP 2: Upload catalog (memory-efficient, multi-sheet)
@@ -77,7 +76,6 @@ for name, df_sheet in all_sheets.items():
         for sku in df_sheet['SKU'].astype(str):
             sheet_lookup[sku] = name
 
-# Now process only the relevant sheet for each entered SKU
 results = []
 vectorizers = {}
 ge_tfidfs = {}
@@ -88,6 +86,7 @@ for sku in skus:
         results.append({
             'Entered SKU': sku,
             'Closest GE SKU': 'Not found (SKU not in catalog)',
+            'Matched GE Model Status': '',
             'Similarity Score': 0
         })
         continue
@@ -102,6 +101,7 @@ for sku in skus:
         vec = TfidfVectorizer()
         tfidf_mat = vec.fit_transform(sheet_df['combined_specs'])
         vectorizers[sheet_name] = vec
+        # Only "GE" brand AND "active model"
         ge_mask = (sheet_df['Brand'].str.lower() == 'ge') & (sheet_df['Model Status'].str.lower() == 'active model')
         ge_df = sheet_df[ge_mask].reset_index(drop=True)
         nge_tfidf = vec.transform(ge_df['combined_specs'])
@@ -116,6 +116,7 @@ for sku in skus:
         results.append({
             'Entered SKU': sku,
             'Closest GE SKU': 'Not found (SKU not in sheet)',
+            'Matched GE Model Status': '',
             'Similarity Score': 0
         })
         continue
@@ -127,6 +128,7 @@ for sku in skus:
         results.append({
             'Entered SKU': sku,
             'Closest GE SKU': 'Not found (no GE match for config)',
+            'Matched GE Model Status': '',
             'Similarity Score': 0
         })
         continue
@@ -136,15 +138,18 @@ for sku in skus:
         results.append({
             'Entered SKU': sku,
             'Closest GE SKU': 'Not found (no similar GE model)',
+            'Matched GE Model Status': '',
             'Similarity Score': 0
         })
     else:
         best_idx = sims.argmax()
         best_sku = filtered_ge.iloc[best_idx]['SKU']
+        best_status = filtered_ge.iloc[best_idx]['Model Status']
         best_score = round(sims[best_idx], 3)
         results.append({
             'Entered SKU': sku,
             'Closest GE SKU': best_sku,
+            'Matched GE Model Status': best_status,
             'Similarity Score': best_score
         })
 
@@ -152,3 +157,9 @@ results_df = pd.DataFrame(results)
 
 st.subheader("Matching Results")
 st.dataframe(results_df)
+
+# Option to download the results table as Excel
+if not results_df.empty:
+    results_excel = to_excel(results_df)
+    st.download_button("Download Matching Results to Excel", data=results_excel, file_name="matching_results.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
