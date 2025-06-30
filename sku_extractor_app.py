@@ -90,7 +90,11 @@ results = []
 for sku in skus:
     comp_row = df[df['SKU'] == sku]
     if comp_row.empty:
-        results.append({'Entered SKU': sku, 'Closest GE SKU': 'Not found', 'Similarity Score': 0})
+        results.append({
+            'Entered SKU': sku,
+            'Closest GE SKU': 'Not found (SKU not in catalog)',
+            'Similarity Score': 0
+        })
         continue
     # Check configuration for strict match
     comp_config = comp_row.iloc[0]['Configuration']
@@ -99,19 +103,32 @@ for sku in skus:
     filtered_ge_tfidf = ge_tfidf[config_mask.values]
 
     if filtered_ge.empty:
-        results.append({'Entered SKU': sku, 'Closest GE SKU': 'Not found', 'Similarity Score': 0})
+        results.append({
+            'Entered SKU': sku,
+            'Closest GE SKU': 'Not found (no GE match for config)',
+            'Similarity Score': 0
+        })
         continue
 
     comp_tfidf = vectorizer.transform([comp_row['combined_specs'].values[0]])
     sims = cosine_similarity(comp_tfidf, filtered_ge_tfidf)[0]
     if sims.max() == 0:
-        results.append({'Entered SKU': sku, 'Closest GE SKU': 'Not found', 'Similarity Score': 0})
+        results.append({
+            'Entered SKU': sku,
+            'Closest GE SKU': 'Not found (no similar GE model)',
+            'Similarity Score': 0
+        })
     else:
         best_idx = sims.argmax()
         best_sku = filtered_ge.iloc[best_idx]['SKU']
         best_score = round(sims[best_idx], 3)
-        results.append({'Entered SKU': sku, 'Closest GE SKU': best_sku, 'Similarity Score': best_score})
+        results.append({
+            'Entered SKU': sku,
+            'Closest GE SKU': best_sku,
+            'Similarity Score': best_score
+        })
 
 results_df = pd.DataFrame(results)
+
 st.subheader("Matching Results")
 st.dataframe(results_df)
