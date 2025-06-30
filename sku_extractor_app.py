@@ -14,7 +14,7 @@ pasted_data = st.text_area("Paste competitor SKU data here:")
 
 def extract_skus_from_excel(df):
     all_text = df.astype(str).values.flatten()
-    sku_pattern = re.compile(r"[A-Z]{2,}[0-9]{2,}[A-Z0-9]*")
+    sku_pattern = re.compile(r"\b[A-Z]{2,}[0-9]{2,}[A-Z0-9]*\b")
     skus = []
     seen = set()
     for text in all_text:
@@ -25,9 +25,8 @@ def extract_skus_from_excel(df):
                 seen.add(match)
     return skus
 
-
 def extract_skus_from_text(text):
-    sku_pattern = re.compile(r"[A-Z]{2,}[0-9]{2,}[A-Z0-9]*")
+    sku_pattern = re.compile(r"\b[A-Z]{2,}[0-9]{2,}[A-Z0-9]*\b")
     skus = []
     seen = set()
     for line in text.upper().splitlines():
@@ -37,7 +36,6 @@ def extract_skus_from_text(text):
                 skus.append(sku)
                 seen.add(sku)
     return skus
-
 
 def to_excel(sku_list):
     df = pd.DataFrame({'SKU': sku_list, 'GE SKU': ''})
