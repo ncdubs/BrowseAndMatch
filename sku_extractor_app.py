@@ -57,13 +57,37 @@ if skus:
     excel_data = to_excel(skus)
     st.download_button("Download SKUs to Excel", data=excel_data, file_name="sku_output.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
-# STEP 2: Upload catalog
-st.header("Step 2: Upload Appliance Catalog (Tall Format)")
-appliance_file = st.file_uploader("Upload catalog Excel (tall, features as columns)", type=["xlsx", "xls"], key="appliance_upload")
+# STEP 2: Upload catalog (supports multiple sheets)
+st.header("Step 2: Upload Appliance Catalog (Tall Format, Multiple Sheets OK)")
+appliance_file = st.file_uploader(
+    "Upload catalog Excel (tall, features as columns, multiple sheets allowed)", 
+    type=["xlsx", "xls"], 
+    key="appliance_upload"
+)
 if not appliance_file:
     st.stop()
 
-df = pd.read_excel(appliance_file)
+# Read all sheets and concatenate
+all_sheets = pd.read_excel(appliance_file, sheet_name=None)
+sheet_dfs = []
+sheet_errors = []
+required = ['SKU', 'Brand', 'Model Status', 'Configuration']
+for name, sheet_df in all_sheets.items():
+    # Standardize columns (strip whitespace)
+    sheet_df.columns = [str(c).strip() for c in sheet_df.columns]
+    # Check for required columns
+    if not all(col in sheet_df.columns for col in required):
+        sheet_errors.append(f"Sheet '{name}' missing: {', '.join([col for col in required if col not in sheet_df.columns])}")
+        continue
+    sheet_dfs.append(sheet_df)
+if sheet_errors:
+    st.error("\n".join(sheet_errors))
+    if not sheet_dfs:
+        st.stop()
+
+# Combine all sheets, keeping all columns (outer join)
+df = pd.concat(sheet_dfs, ignore_index=True, sort=False).fillna("")
+
 if 'SKU' not in df.columns:
     st.error("No 'SKU' column found!")
     st.stop()
@@ -76,6 +100,7 @@ if 'Model Status' not in df.columns:
 if 'Configuration' not in df.columns:
     st.error("No 'Configuration' column found!")
     st.stop()
+
 
 # Use all features except for core metadata columns for matching
 discard_cols = ['SKU', 'Brand', 'Model Status', 'combined_specs']
